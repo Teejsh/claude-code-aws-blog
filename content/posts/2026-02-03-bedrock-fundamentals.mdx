@@ -1,0 +1,227 @@
+---
+title: "Amazon Bedrock Fundamentals: Building Your First AI-Powered Application"
+date: "2026-02-03"
+category: "Bedrock"
+tags: ["AWS", "Bedrock", "AI", "Machine Learning", "Generative AI", "LLM"]
+author: "AWS Developer"
+excerpt: "Learn the fundamental concepts of Amazon Bedrock and build your first AI-powered application using foundation models from leading AI companies through a unified API."
+published: true
+---
+
+## Introduction
+
+Amazon Bedrock is AWS's fully managed service that makes foundation models (FMs) from leading AI companies accessible through a unified API. Whether you're looking to build conversational AI applications, generate content, or create intelligent agents, Bedrock provides the infrastructure and tools to get started quickly without managing the underlying model infrastructure.
+
+In this guide, you'll learn the fundamental concepts of Amazon Bedrock, understand how to interact with different foundation models, and build your first AI-powered application using the AWS SDK.
+
+## Prerequisites
+
+Before getting started with Amazon Bedrock, ensure you have:
+
+- **AWS Account** with appropriate IAM permissions for Bedrock access
+- **AWS CLI** configured with your credentials (`aws configure`)
+- **Node.js** (v18 or later) or **Python** (3.9 or later) installed
+- **Model access enabled** in the Bedrock console for your desired models
+- Basic familiarity with REST APIs and JSON
+
+## Step-by-Step Guide
+
+### Step 1: Enable Model Access in Bedrock Console
+
+Before you can use any foundation models, you need to request access:
+
+1. Navigate to the Amazon Bedrock console
+2. Go to "Model access" in the left sidebar
+3. Click "Enable specific models" or "Enable all models"
+4. Select the models you want to use (e.g., Claude 3.5 Sonnet, Titan Text)
+5. Wait for access to be granted (typically instant for most models)
+
+### Step 2: Install the AWS SDK
+
+For Node.js/TypeScript:
+```bash
+npm install @aws-sdk/client-bedrock-runtime
+```
+
+For Python:
+```bash
+pip install boto3
+```
+
+### Step 3: Make Your First API Call
+
+Here's a simple example using Claude 3.5 Sonnet:
+
+**Node.js/TypeScript:**
+```typescript
+import { BedrockRuntimeClient, InvokeModelCommand } from "@aws-sdk/client-bedrock-runtime";
+
+const client = new BedrockRuntimeClient({ region: "us-east-1" });
+
+async function invokeBedrock(prompt: string) {
+  const payload = {
+    anthropic_version: "bedrock-2023-05-31",
+    max_tokens: 1000,
+    messages: [
+      {
+        role: "user",
+        content: prompt
+      }
+    ]
+  };
+
+  const command = new InvokeModelCommand({
+    modelId: "anthropic.claude-3-5-sonnet-20241022-v2:0",
+    contentType: "application/json",
+    accept: "application/json",
+    body: JSON.stringify(payload)
+  });
+
+  const response = await client.send(command);
+  const responseBody = JSON.parse(new TextDecoder().decode(response.body));
+
+  return responseBody.content[0].text;
+}
+
+// Usage
+const result = await invokeBedrock("Explain quantum computing in simple terms");
+console.log(result);
+```
+
+**Python:**
+```python
+import boto3
+import json
+
+bedrock = boto3.client('bedrock-runtime', region_name='us-east-1')
+
+def invoke_bedrock(prompt):
+    payload = {
+        "anthropic_version": "bedrock-2023-05-31",
+        "max_tokens": 1000,
+        "messages": [
+            {
+                "role": "user",
+                "content": prompt
+            }
+        ]
+    }
+
+    response = bedrock.invoke_model(
+        modelId="anthropic.claude-3-5-sonnet-20241022-v2:0",
+        contentType="application/json",
+        accept="application/json",
+        body=json.dumps(payload)
+    )
+
+    response_body = json.loads(response['body'].read())
+    return response_body['content'][0]['text']
+
+# Usage
+result = invoke_bedrock("Explain quantum computing in simple terms")
+print(result)
+```
+
+### Step 4: Implement Streaming Responses
+
+For better user experience with long responses, use streaming:
+
+```typescript
+import { BedrockRuntimeClient, InvokeModelWithResponseStreamCommand } from "@aws-sdk/client-bedrock-runtime";
+
+async function streamBedrock(prompt: string) {
+  const client = new BedrockRuntimeClient({ region: "us-east-1" });
+
+  const command = new InvokeModelWithResponseStreamCommand({
+    modelId: "anthropic.claude-3-5-sonnet-20241022-v2:0",
+    contentType: "application/json",
+    accept: "application/json",
+    body: JSON.stringify({
+      anthropic_version: "bedrock-2023-05-31",
+      max_tokens: 1000,
+      messages: [{ role: "user", content: prompt }]
+    })
+  });
+
+  const response = await client.send(command);
+
+  if (response.body) {
+    for await (const event of response.body) {
+      if (event.chunk) {
+        const chunk = JSON.parse(new TextDecoder().decode(event.chunk.bytes));
+        if (chunk.type === 'content_block_delta') {
+          process.stdout.write(chunk.delta.text);
+        }
+      }
+    }
+  }
+}
+```
+
+### Step 5: Add Error Handling and Retry Logic
+
+Implement robust error handling for production use:
+
+```typescript
+async function invokBedrockWithRetry(prompt: string, maxRetries = 3) {
+  for (let attempt = 1; attempt <= maxRetries; attempt++) {
+    try {
+      return await invokeBedrock(prompt);
+    } catch (error: any) {
+      if (error.name === 'ThrottlingException' && attempt < maxRetries) {
+        const delay = Math.pow(2, attempt) * 1000; // Exponential backoff
+        console.log(`Rate limited. Retrying in ${delay}ms...`);
+        await new Promise(resolve => setTimeout(resolve, delay));
+      } else if (error.name === 'ModelNotReadyException') {
+        throw new Error('Model access not enabled. Please enable in Bedrock console.');
+      } else {
+        throw error;
+      }
+    }
+  }
+}
+```
+
+## Best Practices
+
+- **Enable only the models you need** to reduce costs and maintain security boundaries
+- **Use streaming for long-form content** to improve perceived performance and user experience
+- **Implement proper error handling** including throttling, timeouts, and model-specific errors
+- **Cache responses when appropriate** to reduce API calls and improve response times
+- **Monitor token usage** to optimize costs and stay within service quotas
+- **Use IAM roles with least privilege** - grant only necessary Bedrock permissions
+- **Implement content filtering** using Bedrock Guardrails for production applications
+- **Version your prompts** and track performance metrics for continuous improvement
+
+## Common Pitfalls
+
+- **Pitfall 1: Forgetting to enable model access** - Always check the Bedrock console to ensure you've requested and received access to the models you want to use. API calls will fail with access denied errors otherwise.
+
+- **Pitfall 2: Not handling rate limits** - Bedrock has service quotas that vary by model and region. Implement exponential backoff and retry logic to handle ThrottlingException errors gracefully.
+
+- **Pitfall 3: Ignoring token limits** - Each model has maximum token limits for input and output. Exceeding these will cause errors. Always validate prompt length and set appropriate max_tokens values.
+
+- **Pitfall 4: Hardcoding model IDs** - Model versions change over time. Use environment variables or configuration files for model IDs to make updates easier.
+
+- **Pitfall 5: Not monitoring costs** - Foundation model usage can become expensive at scale. Set up CloudWatch alarms and use AWS Cost Explorer to track Bedrock spending.
+
+## Conclusion
+
+Amazon Bedrock simplifies the integration of powerful foundation models into your applications. By following this guide, you've learned how to enable model access, make API calls, implement streaming, and apply best practices for production use.
+
+As you continue building with Bedrock, explore advanced features like:
+- **Bedrock Agents** for autonomous task completion
+- **Knowledge Bases** for retrieval-augmented generation (RAG)
+- **Guardrails** for content filtering and safety
+- **Model customization** with fine-tuning and continued pre-training
+
+Start small, experiment with different models, and gradually build more sophisticated AI-powered features into your applications.
+
+## Further Reading
+
+- [Amazon Bedrock Documentation](https://docs.aws.amazon.com/bedrock/)
+- [Bedrock User Guide - Model Parameters](https://docs.aws.amazon.com/bedrock/latest/userguide/model-parameters.html)
+- [Bedrock Pricing](https://aws.amazon.com/bedrock/pricing/)
+- [AWS SDK for JavaScript v3 - Bedrock Runtime](https://docs.aws.amazon.com/AWSJavaScriptSDK/v3/latest/clients/client-bedrock-runtime/)
+- [Anthropic Claude on Bedrock](https://docs.anthropic.com/claude/docs/claude-on-amazon-bedrock)
+- [Building with Bedrock - AWS Blog](https://aws.amazon.com/blogs/machine-learning/category/artificial-intelligence/amazon-bedrock/)

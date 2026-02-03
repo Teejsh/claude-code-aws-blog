@@ -1,0 +1,138 @@
+---
+title: "Building Custom MCP Servers for Claude Code"
+date: "2025-10-20"
+author: "David Kim"
+excerpt: "A comprehensive guide to creating Model Context Protocol servers that extend Claude Code's capabilities."
+category: "MCP"
+tags: ["MCP", "Servers", "Development", "Integration"]
+published: true
+---
+
+# Building Custom MCP Servers for Claude Code
+
+Model Context Protocol (MCP) servers are a powerful way to extend Claude Code's capabilities. In this guide, we'll build a custom MCP server from scratch.
+
+## What is MCP?
+
+MCP (Model Context Protocol) is a standardized way to give Claude Code access to external tools, data sources, and services. Think of it as building plugins for Claude.
+
+## Why Build an MCP Server?
+
+MCP servers allow you to:
+
+- Connect Claude to your company's internal APIs
+- Integrate with databases and data sources
+- Add custom tools and commands
+- Extend Claude's knowledge with domain-specific information
+
+## Architecture Overview
+
+An MCP server consists of:
+
+1. **Server endpoint** - Handles requests from Claude Code
+2. **Tool definitions** - Describes what the server can do
+3. **Handler logic** - Implements the actual functionality
+
+## Building Your First MCP Server
+
+Let's create an MCP server that queries AWS CloudWatch metrics.
+
+### Step 1: Project Setup
+
+```bash
+mkdir cloudwatch-mcp-server
+cd cloudwatch-mcp-server
+npm init -y
+npm install @anthropic/mcp-server aws-sdk
+```
+
+### Step 2: Define Tools
+
+Create a `tools.json` file:
+
+```json
+{
+  "tools": [
+    {
+      "name": "get_cloudwatch_metrics",
+      "description": "Fetch metrics from AWS CloudWatch",
+      "parameters": {
+        "namespace": "string",
+        "metric_name": "string",
+        "start_time": "string",
+        "end_time": "string"
+      }
+    }
+  ]
+}
+```
+
+### Step 3: Implement the Server
+
+```typescript
+import { MCPServer } from '@anthropic/mcp-server';
+import { CloudWatch } from 'aws-sdk';
+
+const server = new MCPServer({
+  name: 'cloudwatch-metrics',
+  version: '1.0.0',
+});
+
+server.tool('get_cloudwatch_metrics', async (params) => {
+  const cloudwatch = new CloudWatch();
+
+  const result = await cloudwatch.getMetricData({
+    MetricDataQueries: [{
+      Id: 'm1',
+      MetricStat: {
+        Metric: {
+          Namespace: params.namespace,
+          MetricName: params.metric_name,
+        },
+        Period: 300,
+        Stat: 'Average',
+      },
+    }],
+    StartTime: new Date(params.start_time),
+    EndTime: new Date(params.end_time),
+  }).promise();
+
+  return result;
+});
+
+server.start();
+```
+
+### Step 4: Register with Claude Code
+
+```bash
+claude-code mcp register ./cloudwatch-mcp-server
+```
+
+## Testing Your Server
+
+Test your MCP server:
+
+```bash
+claude-code "Show me the CPU utilization for my EC2 instances in the last hour"
+```
+
+Claude will now use your custom MCP server to fetch the CloudWatch data!
+
+## Best Practices
+
+- **Error Handling**: Always handle AWS API errors gracefully
+- **Authentication**: Use IAM roles when possible
+- **Rate Limiting**: Implement throttling to avoid API limits
+- **Logging**: Add comprehensive logging for debugging
+
+## Advanced Topics
+
+Once you're comfortable with basic MCP servers, explore:
+
+- Streaming responses for long-running operations
+- Caching frequently accessed data
+- Building MCP servers for other AWS services
+- Creating multi-tool MCP servers
+
+Building MCP servers unlocks the full potential of Claude Code. Start simple and iterate!

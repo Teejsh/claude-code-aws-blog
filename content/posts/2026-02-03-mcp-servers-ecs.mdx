@@ -1,0 +1,416 @@
+---
+title: "Deploying MCP Servers on Amazon ECS: A Complete Infrastructure Guide"
+date: "2026-02-03"
+category: "Infrastructure"
+tags: ["AWS", "ECS", "MCP", "Docker", "Infrastructure", "Fargate", "Claude", "AI"]
+author: "AWS Developer"
+excerpt: "Deploy Model Context Protocol servers on Amazon ECS with scalability and high availability. Complete guide covering containerization, Fargate deployment, and production best practices."
+published: true
+---
+
+## Introduction
+
+Model Context Protocol (MCP) servers enable Claude and other AI assistants to interact with external data sources and tools. While MCP servers can run locally, deploying them on AWS infrastructure like Amazon ECS (Elastic Container Service) provides scalability, high availability, and seamless integration with other AWS services.
+
+In this comprehensive guide, you'll learn how to containerize MCP servers, deploy them on Amazon ECS using both EC2 and Fargate launch types, configure networking and security, and implement best practices for production deployments. By the end, you'll have a production-ready MCP server infrastructure that can scale with your needs.
+
+## Prerequisites
+
+Before you begin, ensure you have:
+
+- **AWS Account** with appropriate IAM permissions for ECS, ECR, VPC, and CloudWatch
+- **AWS CLI** configured with your credentials (`aws configure`)
+- **Docker** installed locally for building container images
+- **Node.js** or **Python** installed for MCP server development
+- **Basic understanding** of containerization and networking concepts
+- **An MCP server** ready to deploy (or use the example provided)
+
+## Step-by-Step Guide
+
+### Step 1: Create and Containerize Your MCP Server
+
+First, let's create a simple MCP server and containerize it. Here's an example Node.js MCP server:
+
+**server.js:**
+```javascript
+import { Server } from "@modelcontextprotocol/sdk/server/index.js";
+import { StdioServerTransport } from "@modelcontextprotocol/sdk/server/stdio.js";
+import { z } from "zod";
+
+const server = new Server(
+  {
+    name: "example-mcp-server",
+    version: "1.0.0",
+  },
+  {
+    capabilities: {
+      tools: {},
+    },
+  }
+);
+
+// Define a sample tool
+server.setRequestHandler("tools/list", async () => {
+  return {
+    tools: [
+      {
+        name: "get_weather",
+        description: "Get weather information for a location",
+        inputSchema: {
+          type: "object",
+          properties: {
+            location: {
+              type: "string",
+              description: "City name or zip code",
+            },
+          },
+          required: ["location"],
+        },
+      },
+    ],
+  };
+});
+
+server.setRequestHandler("tools/call", async (request) => {
+  if (request.params.name === "get_weather") {
+    const location = request.params.arguments.location;
+    // Simulate weather API call
+    return {
+      content: [
+        {
+          type: "text",
+          text: `Weather in ${location}: Sunny, 72°F`,
+        },
+      ],
+    };
+  }
+  throw new Error(`Unknown tool: ${request.params.name}`);
+});
+
+// Start the server
+const transport = new StdioServerTransport();
+await server.connect(transport);
+```
+
+**Dockerfile:**
+```dockerfile
+FROM node:20-alpine
+
+WORKDIR /app
+
+# Copy package files
+COPY package*.json ./
+
+# Install dependencies
+RUN npm ci --only=production
+
+# Copy application code
+COPY . .
+
+# Create non-root user
+RUN addgroup -g 1001 -S nodejs && \
+    adduser -S nodejs -u 1001 && \
+    chown -R nodejs:nodejs /app
+
+USER nodejs
+
+# Expose port for health checks
+EXPOSE 8080
+
+# Start the MCP server
+CMD ["node", "server.js"]
+```
+
+**package.json:**
+```json
+{
+  "name": "example-mcp-server",
+  "version": "1.0.0",
+  "type": "module",
+  "dependencies": {
+    "@modelcontextprotocol/sdk": "^1.0.0",
+    "zod": "^3.22.0"
+  }
+}
+```
+
+### Step 2: Build and Push to Amazon ECR
+
+Create an ECR repository and push your container image:
+
+```bash
+# Create ECR repository
+aws ecr create-repository \
+  --repository-name mcp-server \
+  --region us-east-1
+
+# Get ECR login token
+aws ecr get-login-password --region us-east-1 | \
+  docker login --username AWS \
+  --password-stdin <account-id>.dkr.ecr.us-east-1.amazonaws.com
+
+# Build the Docker image
+docker build -t mcp-server:latest .
+
+# Tag the image
+docker tag mcp-server:latest \
+  <account-id>.dkr.ecr.us-east-1.amazonaws.com/mcp-server:latest
+
+# Push to ECR
+docker push <account-id>.dkr.ecr.us-east-1.amazonaws.com/mcp-server:latest
+```
+
+### Step 3: Create ECS Task Definition
+
+Create a task definition that specifies how to run your MCP server container:
+
+**task-definition.json:**
+```json
+{
+  "family": "mcp-server-task",
+  "networkMode": "awsvpc",
+  "requiresCompatibilities": ["FARGATE"],
+  "cpu": "256",
+  "memory": "512",
+  "executionRoleArn": "arn:aws:iam::<account-id>:role/ecsTaskExecutionRole",
+  "taskRoleArn": "arn:aws:iam::<account-id>:role/mcpServerTaskRole",
+  "containerDefinitions": [
+    {
+      "name": "mcp-server",
+      "image": "<account-id>.dkr.ecr.us-east-1.amazonaws.com/mcp-server:latest",
+      "essential": true,
+      "logConfiguration": {
+        "logDriver": "awslogs",
+        "options": {
+          "awslogs-group": "/ecs/mcp-server",
+          "awslogs-region": "us-east-1",
+          "awslogs-stream-prefix": "ecs"
+        }
+      },
+      "environment": [
+        {
+          "name": "NODE_ENV",
+          "value": "production"
+        }
+      ],
+      "portMappings": [
+        {
+          "containerPort": 8080,
+          "protocol": "tcp"
+        }
+      ],
+      "healthCheck": {
+        "command": ["CMD-SHELL", "node -e 'process.exit(0)'"],
+        "interval": 30,
+        "timeout": 5,
+        "retries": 3,
+        "startPeriod": 60
+      }
+    }
+  ]
+}
+```
+
+Register the task definition:
+
+```bash
+aws ecs register-task-definition \
+  --cli-input-json file://task-definition.json
+```
+
+### Step 4: Create ECS Cluster and Service
+
+Create an ECS cluster:
+
+```bash
+aws ecs create-cluster \
+  --cluster-name mcp-cluster \
+  --region us-east-1 \
+  --capacity-providers FARGATE FARGATE_SPOT \
+  --default-capacity-provider-strategy \
+    capacityProvider=FARGATE,weight=1 \
+    capacityProvider=FARGATE_SPOT,weight=4
+```
+
+Create a security group for the MCP server:
+
+```bash
+# Create security group
+aws ec2 create-security-group \
+  --group-name mcp-server-sg \
+  --description "Security group for MCP server" \
+  --vpc-id <vpc-id>
+
+# Add inbound rule (adjust as needed)
+aws ec2 authorize-security-group-ingress \
+  --group-id <sg-id> \
+  --protocol tcp \
+  --port 8080 \
+  --cidr 10.0.0.0/16
+```
+
+Create the ECS service:
+
+```bash
+aws ecs create-service \
+  --cluster mcp-cluster \
+  --service-name mcp-server-service \
+  --task-definition mcp-server-task \
+  --desired-count 2 \
+  --launch-type FARGATE \
+  --network-configuration "awsvpcConfiguration={
+    subnets=[subnet-xxx,subnet-yyy],
+    securityGroups=[sg-xxx],
+    assignPublicIp=DISABLED
+  }"
+```
+
+### Step 5: Configure Load Balancing (Optional)
+
+For HTTP-based MCP servers, add an Application Load Balancer:
+
+```bash
+# Create target group
+aws elbv2 create-target-group \
+  --name mcp-server-tg \
+  --protocol HTTP \
+  --port 8080 \
+  --vpc-id <vpc-id> \
+  --target-type ip \
+  --health-check-path /health
+
+# Create load balancer
+aws elbv2 create-load-balancer \
+  --name mcp-server-alb \
+  --subnets subnet-xxx subnet-yyy \
+  --security-groups sg-xxx
+
+# Create listener
+aws elbv2 create-listener \
+  --load-balancer-arn <alb-arn> \
+  --protocol HTTPS \
+  --port 443 \
+  --certificates CertificateArn=<cert-arn> \
+  --default-actions Type=forward,TargetGroupArn=<tg-arn>
+
+# Update ECS service to use load balancer
+aws ecs update-service \
+  --cluster mcp-cluster \
+  --service mcp-server-service \
+  --load-balancers "targetGroupArn=<tg-arn>,containerName=mcp-server,containerPort=8080"
+```
+
+### Step 6: Set Up Monitoring and Logging
+
+Create CloudWatch log group:
+
+```bash
+aws logs create-log-group \
+  --log-group-name /ecs/mcp-server
+```
+
+Configure CloudWatch alarms:
+
+```bash
+# CPU utilization alarm
+aws cloudwatch put-metric-alarm \
+  --alarm-name mcp-server-high-cpu \
+  --alarm-description "Alert when CPU exceeds 80%" \
+  --metric-name CPUUtilization \
+  --namespace AWS/ECS \
+  --statistic Average \
+  --period 300 \
+  --threshold 80 \
+  --comparison-operator GreaterThanThreshold \
+  --evaluation-periods 2 \
+  --dimensions Name=ServiceName,Value=mcp-server-service \
+              Name=ClusterName,Value=mcp-cluster
+```
+
+### Step 7: Implement Auto-Scaling
+
+Configure auto-scaling for your ECS service:
+
+```bash
+# Register scalable target
+aws application-autoscaling register-scalable-target \
+  --service-namespace ecs \
+  --resource-id service/mcp-cluster/mcp-server-service \
+  --scalable-dimension ecs:service:DesiredCount \
+  --min-capacity 2 \
+  --max-capacity 10
+
+# Create scaling policy
+aws application-autoscaling put-scaling-policy \
+  --service-namespace ecs \
+  --resource-id service/mcp-cluster/mcp-server-service \
+  --scalable-dimension ecs:service:DesiredCount \
+  --policy-name cpu-scaling-policy \
+  --policy-type TargetTrackingScaling \
+  --target-tracking-scaling-policy-configuration file://scaling-policy.json
+```
+
+**scaling-policy.json:**
+```json
+{
+  "TargetValue": 70.0,
+  "PredefinedMetricSpecification": {
+    "PredefinedMetricType": "ECSServiceAverageCPUUtilization"
+  },
+  "ScaleInCooldown": 300,
+  "ScaleOutCooldown": 60
+}
+```
+
+## Best Practices
+
+- **Use Fargate for simplified operations** - Avoid managing EC2 instances unless you have specific requirements that necessitate EC2 launch type
+- **Implement proper IAM roles** - Create separate task execution roles (for ECS to pull images and write logs) and task roles (for application permissions)
+- **Enable Container Insights** - Use CloudWatch Container Insights for detailed metrics and performance monitoring
+- **Use private subnets with NAT Gateway** - Deploy MCP servers in private subnets and use NAT Gateway for outbound internet access
+- **Implement blue/green deployments** - Use ECS deployment circuit breaker and CloudFormation for safe, automated deployments
+- **Tag all resources** - Apply consistent tagging for cost allocation, automation, and resource management
+- **Use secrets management** - Store sensitive configuration in AWS Secrets Manager or Parameter Store, not in environment variables
+- **Implement health checks** - Define both container health checks and load balancer health checks for reliability
+- **Enable ECS Exec for debugging** - Allow secure shell access to running containers for troubleshooting
+- **Use VPC endpoints** - Reduce data transfer costs and improve security by using VPC endpoints for ECR, CloudWatch, and Secrets Manager
+
+## Common Pitfalls
+
+- **Pitfall 1: Incorrect IAM permissions** - ECS requires two separate IAM roles: task execution role (for ECS agent operations like pulling images) and task role (for application-level AWS API calls). Confusing these or missing permissions causes deployment failures. Always verify both roles have appropriate policies attached.
+
+- **Pitfall 2: Insufficient CPU/memory allocation** - MCP servers can be memory-intensive, especially when processing large contexts. Monitor actual resource usage and allocate at least 20% more than peak usage. Setting too low causes OOMKilled errors and task restarts.
+
+- **Pitfall 3: Missing VPC configuration** - When using awsvpc network mode (required for Fargate), you must configure subnets and security groups correctly. Ensure security groups allow necessary inbound/outbound traffic and that subnets have proper routing (NAT Gateway for private subnets).
+
+- **Pitfall 4: Not handling graceful shutdown** - MCP servers need proper SIGTERM handling to complete in-flight requests during deployments. Without this, container updates can interrupt active sessions. Implement signal handlers and set appropriate deregistration delays on load balancers.
+
+- **Pitfall 5: Overlooking CloudWatch Logs costs** - MCP servers can generate significant log volume. Configure log retention policies, use log filtering, and consider exporting logs to S3 for cost optimization. Uncontrolled logging can result in unexpected CloudWatch costs.
+
+- **Pitfall 6: Using latest image tags in production** - Always use specific version tags (e.g., `v1.2.3`) instead of `latest` to ensure reproducible deployments and easier rollbacks. The `latest` tag can change unexpectedly and cause deployment issues.
+
+## Conclusion
+
+Deploying MCP servers on Amazon ECS provides a robust, scalable infrastructure for running AI assistant integrations in production. By containerizing your MCP servers, leveraging Fargate for serverless compute, and implementing proper monitoring and auto-scaling, you can build reliable systems that grow with your needs.
+
+Key takeaways from this guide:
+- Containerization enables consistent deployments across environments
+- ECS Fargate eliminates infrastructure management overhead
+- Proper IAM configuration is critical for security and functionality
+- Auto-scaling and monitoring ensure reliability at scale
+
+As you continue building with MCP on AWS, explore:
+- **AWS App Runner** for even simpler deployments of HTTP-based MCP servers
+- **Amazon EKS** for more complex orchestration requirements
+- **AWS Lambda** for event-driven MCP server architectures
+- **Amazon API Gateway** for fine-grained API management and throttling
+
+## Further Reading
+
+- [Amazon ECS Developer Guide](https://docs.aws.amazon.com/ecs/)
+- [AWS Fargate Documentation](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/AWS_Fargate.html)
+- [Model Context Protocol Specification](https://modelcontextprotocol.io/)
+- [ECS Task Definition Parameters](https://docs.aws.amazon.com/AmazonECS/latest/developerguide/task_definition_parameters.html)
+- [Amazon ECR User Guide](https://docs.aws.amazon.com/ecr/)
+- [AWS Copilot CLI](https://aws.github.io/copilot-cli/) - Simplified ECS deployments
+- [ECS Best Practices Guide](https://docs.aws.amazon.com/AmazonECS/latest/bestpracticesguide/intro.html)

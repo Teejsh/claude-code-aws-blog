@@ -1,0 +1,72 @@
+---
+title: "Getting Started with Claude Code on AWS"
+date: "2025-10-22"
+author: "Sarah Chen"
+excerpt: "Learn how to set up Claude Code with AWS Bedrock for AI-powered development workflows."
+category: "Getting Started"
+tags: ["AWS", "Claude Code", "Bedrock", "Setup"]
+published: true
+---
+
+# Getting Started with Claude Code on AWS
+
+Welcome to the world of AI-powered development with Claude Code on AWS Bedrock! This guide will walk you through everything you need to know to get started.
+
+## What is Claude Code?
+
+Claude Code is an AI-powered development assistant that helps you write, understand, and improve code faster. When integrated with AWS Bedrock, you get access to Claude's capabilities through a scalable, secure AWS infrastructure.
+
+## Prerequisites
+
+Before you begin, make sure you have:
+
+- An AWS account with Bedrock access
+- Basic knowledge of the AWS CLI
+- Familiarity with your preferred IDE
+
+## Setting Up AWS Bedrock
+
+First, you'll need to enable Claude in AWS Bedrock:
+
+1. Navigate to the AWS Bedrock console
+2. Request model access for Anthropic Claude
+3. Wait for approval (usually takes a few minutes)
+
+## Installing Claude Code
+
+Once your AWS account is configured, install Claude Code:
+
+```bash
+npm install -g @anthropic/claude-code
+```
+
+## Configuring Your Environment
+
+Set up your AWS credentials and configure Claude Code to use Bedrock:
+
+```bash
+export AWS_REGION=us-east-1
+export AWS_PROFILE=your-profile
+claude-code configure --provider bedrock
+```
+
+## Your First AI-Assisted Task
+
+Let's test your setup with a simple task:
+
+```bash
+claude-code "Create a Lambda function that processes S3 events"
+```
+
+Claude Code will generate the code, tests, and deployment configuration for you.
+
+## Next Steps
+
+Now that you're set up, explore these topics:
+
+- Building custom MCP servers
+- Integrating Claude Code into your CI/CD pipeline
+- Best practices for prompt engineering
+- Advanced AWS Bedrock configurations
+
+Happy coding with Claude!

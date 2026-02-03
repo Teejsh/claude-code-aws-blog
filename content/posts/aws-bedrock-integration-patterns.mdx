@@ -1,0 +1,211 @@
+---
+title: "AWS Bedrock Integration Patterns with Claude Code"
+date: "2025-10-18"
+author: "Maria Rodriguez"
+excerpt: "Explore different patterns for integrating Claude Code with AWS Bedrock in production applications."
+category: "AWS"
+tags: ["AWS", "Bedrock", "Integration", "Patterns"]
+published: true
+---
+
+# AWS Bedrock Integration Patterns with Claude Code
+
+When building production applications with Claude Code and AWS Bedrock, choosing the right integration pattern is crucial. Let's explore the most common patterns and when to use each.
+
+## Pattern 1: Direct API Integration
+
+The simplest pattern is calling Bedrock APIs directly from your application.
+
+### When to Use
+- Small to medium applications
+- Simple use cases
+- Development and testing
+
+### Implementation
+
+```python
+import boto3
+
+bedrock = boto3.client('bedrock-runtime')
+
+response = bedrock.invoke_model(
+    modelId='anthropic.claude-3-sonnet-20240229-v1:0',
+    body=json.dumps({
+        'anthropic_version': 'bedrock-2023-05-31',
+        'messages': [{
+            'role': 'user',
+            'content': 'Analyze this code for security issues'
+        }],
+        'max_tokens': 2048
+    })
+)
+```
+
+### Pros and Cons
+✅ Simple to implement
+✅ Low latency
+❌ Less control over rate limiting
+❌ Harder to add middleware
+
+## Pattern 2: Lambda Proxy Pattern
+
+Use Lambda functions as a proxy layer between your application and Bedrock.
+
+### When to Use
+- Need request/response transformation
+- Want centralized logging and monitoring
+- Require custom authentication
+
+### Architecture
+
+```
+Application → API Gateway → Lambda → Bedrock
+```
+
+### Implementation
+
+```javascript
+// Lambda handler
+export const handler = async (event) => {
+  const bedrock = new BedrockRuntime();
+
+  // Add custom logic here
+  const sanitizedInput = sanitize(event.body);
+
+  const response = await bedrock.invokeModel({
+    modelId: 'anthropic.claude-3-sonnet-20240229-v1:0',
+    body: JSON.stringify({
+      anthropic_version: 'bedrock-2023-05-31',
+      messages: [{ role: 'user', content: sanitizedInput }],
+      max_tokens: 2048
+    })
+  });
+
+  // Transform response
+  return formatResponse(response);
+};
+```
+
+### Pros and Cons
+✅ Centralized control
+✅ Easy to add middleware
+✅ Good for microservices
+❌ Additional latency
+❌ More infrastructure to manage
+
+## Pattern 3: Event-Driven Pattern
+
+Process requests asynchronously using SQS or EventBridge.
+
+### When to Use
+- Batch processing
+- Non-time-sensitive tasks
+- High-volume scenarios
+
+### Architecture
+
+```
+Application → SQS → Lambda → Bedrock → S3 (results)
+```
+
+### Implementation
+
+```python
+import boto3
+
+sqs = boto3.client('sqs')
+bedrock = boto3.client('bedrock-runtime')
+s3 = boto3.client('s3')
+
+def process_message(message):
+    # Invoke Bedrock
+    response = bedrock.invoke_model(
+        modelId='anthropic.claude-3-sonnet-20240229-v1:0',
+        body=message['body']
+    )
+
+    # Store results in S3
+    s3.put_object(
+        Bucket='results-bucket',
+        Key=f"results/{message['id']}.json",
+        Body=response['body']
+    )
+```
+
+### Pros and Cons
+✅ Handles high volume
+✅ Resilient to failures
+✅ Cost-effective
+❌ Not suitable for real-time
+❌ More complex architecture
+
+## Pattern 4: Streaming Pattern
+
+Use streaming responses for real-time interactions.
+
+### When to Use
+- Chat applications
+- Real-time code generation
+- Interactive UIs
+
+### Implementation
+
+```typescript
+const response = await bedrock.invokeModelWithResponseStream({
+  modelId: 'anthropic.claude-3-sonnet-20240229-v1:0',
+  body: JSON.stringify({
+    anthropic_version: 'bedrock-2023-05-31',
+    messages: [{ role: 'user', content: prompt }],
+    max_tokens: 2048
+  })
+});
+
+for await (const event of response.body) {
+  const chunk = JSON.parse(
+    new TextDecoder().decode(event.chunk.bytes)
+  );
+
+  if (chunk.type === 'content_block_delta') {
+    process.stdout.write(chunk.delta.text);
+  }
+}
+```
+
+### Pros and Cons
+✅ Better user experience
+✅ Lower perceived latency
+✅ Can cancel mid-stream
+❌ More complex client code
+❌ Requires WebSocket or SSE
+
+## Choosing the Right Pattern
+
+Consider these factors:
+
+1. **Latency Requirements**: Real-time? Use streaming or direct.
+2. **Volume**: High volume? Use event-driven.
+3. **Complexity**: Simple app? Use direct integration.
+4. **Control**: Need middleware? Use Lambda proxy.
+
+## Security Best Practices
+
+Regardless of pattern:
+
+- Use IAM roles, not access keys
+- Enable AWS CloudTrail logging
+- Implement request validation
+- Set up AWS WAF for API Gateway
+- Use VPC endpoints for internal services
+
+## Cost Optimization
+
+- Use provisioned throughput for predictable workloads
+- Implement caching where appropriate
+- Batch requests when possible
+- Monitor usage with CloudWatch
+
+## Conclusion
+
+Each integration pattern has its place. Start with direct integration for simplicity, then evolve to more sophisticated patterns as your needs grow.
+
+The key is understanding your requirements and choosing the pattern that best fits your use case.
