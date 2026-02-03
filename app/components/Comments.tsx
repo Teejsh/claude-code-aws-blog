@@ -20,8 +20,11 @@ export default function Comments({ postId }: CommentsProps) {
   const [email, setEmail] = useState('');
   const [message, setMessage] = useState('');
   const [isSubmitting, setIsSubmitting] = useState(false);
+  const [editingId, setEditingId] = useState<string | null>(null);
+  const [editMessage, setEditMessage] = useState('');
 
   const storageKey = `blog-comments-${postId}`;
+  const maxMessageLength = 1000;
 
   // Load comments from localStorage on mount
   useEffect(() => {
@@ -39,6 +42,8 @@ export default function Comments({ postId }: CommentsProps) {
   useEffect(() => {
     if (comments.length > 0) {
       localStorage.setItem(storageKey, JSON.stringify(comments));
+    } else {
+      localStorage.removeItem(storageKey);
     }
   }, [comments, storageKey]);
 
@@ -61,6 +66,40 @@ export default function Comments({ postId }: CommentsProps) {
     setEmail('');
     setMessage('');
     setIsSubmitting(false);
+  };
+
+  const handleDelete = (commentId: string) => {
+    if (window.confirm('Are you sure you want to delete this comment? This action cannot be undone.')) {
+      setComments(comments.filter(comment => comment.id !== commentId));
+    }
+  };
+
+  const handleEdit = (commentId: string) => {
+    const comment = comments.find(c => c.id === commentId);
+    if (comment) {
+      setEditingId(commentId);
+      setEditMessage(comment.message);
+    }
+  };
+
+  const handleSaveEdit = (commentId: string) => {
+    if (editMessage.trim().length < 10) {
+      alert('Message must be at least 10 characters long.');
+      return;
+    }
+
+    setComments(comments.map(comment =>
+      comment.id === commentId
+        ? { ...comment, message: editMessage.trim() }
+        : comment
+    ));
+    setEditingId(null);
+    setEditMessage('');
+  };
+
+  const handleCancelEdit = () => {
+    setEditingId(null);
+    setEditMessage('');
   };
 
   const formatTimestamp = (timestamp: number) => {
@@ -128,16 +167,21 @@ export default function Comments({ postId }: CommentsProps) {
         </div>
 
         <div className="form-group">
-          <label htmlFor="message" className="form-label">
-            Message <span className="required">*</span>
-          </label>
+          <div className="label-row">
+            <label htmlFor="message" className="form-label">
+              Message <span className="required">*</span>
+            </label>
+            <span className={`char-counter ${message.length > maxMessageLength ? 'over-limit' : ''}`}>
+              {message.length} / {maxMessageLength}
+            </span>
+          </div>
           <textarea
             id="message"
             value={message}
             onChange={(e) => setMessage(e.target.value)}
             required
             minLength={10}
-            maxLength={1000}
+            maxLength={maxMessageLength}
             rows={4}
             className="form-textarea"
             placeholder="Share your thoughts..."
@@ -168,8 +212,64 @@ export default function Comments({ postId }: CommentsProps) {
                     {formatTimestamp(comment.timestamp)}
                   </time>
                 </div>
+                <div className="comment-actions">
+                  <button
+                    onClick={() => handleEdit(comment.id)}
+                    className="action-button edit-button"
+                    aria-label="Edit comment"
+                    title="Edit"
+                  >
+                    ✏️
+                  </button>
+                  <button
+                    onClick={() => handleDelete(comment.id)}
+                    className="action-button delete-button"
+                    aria-label="Delete comment"
+                    title="Delete"
+                  >
+                    🗑️
+                  </button>
+                </div>
               </div>
-              <p className="comment-message">{comment.message}</p>
+
+              {editingId === comment.id ? (
+                <div className="edit-form">
+                  <div className="label-row">
+                    <label htmlFor={`edit-${comment.id}`} className="form-label">
+                      Edit Message
+                    </label>
+                    <span className={`char-counter ${editMessage.length > maxMessageLength ? 'over-limit' : ''}`}>
+                      {editMessage.length} / {maxMessageLength}
+                    </span>
+                  </div>
+                  <textarea
+                    id={`edit-${comment.id}`}
+                    value={editMessage}
+                    onChange={(e) => setEditMessage(e.target.value)}
+                    minLength={10}
+                    maxLength={maxMessageLength}
+                    rows={4}
+                    className="form-textarea"
+                  />
+                  <div className="edit-actions">
+                    <button
+                      onClick={() => handleSaveEdit(comment.id)}
+                      className="save-button"
+                      disabled={editMessage.trim().length < 10}
+                    >
+                      Save
+                    </button>
+                    <button
+                      onClick={handleCancelEdit}
+                      className="cancel-button"
+                    >
+                      Cancel
+                    </button>
+                  </div>
+                </div>
+              ) : (
+                <p className="comment-message">{comment.message}</p>
+              )}
             </article>
           ))}
         </div>
@@ -231,6 +331,12 @@ export default function Comments({ postId }: CommentsProps) {
           gap: 0.5rem;
         }
 
+        .label-row {
+          display: flex;
+          justify-content: space-between;
+          align-items: center;
+        }
+
         .form-label {
           font-size: 0.875rem;
           font-weight: 600;
@@ -239,6 +345,17 @@ export default function Comments({ postId }: CommentsProps) {
 
         .required {
           color: #FF9900;
+        }
+
+        .char-counter {
+          font-size: 0.75rem;
+          color: #545B64;
+          font-weight: 500;
+        }
+
+        .char-counter.over-limit {
+          color: #d32f2f;
+          font-weight: 700;
         }
 
         .form-input,
@@ -364,11 +481,103 @@ export default function Comments({ postId }: CommentsProps) {
           color: #545B64;
         }
 
+        .comment-actions {
+          display: flex;
+          gap: 0.5rem;
+        }
+
+        .action-button {
+          background: transparent;
+          border: 1px solid #F2F3F3;
+          border-radius: 0.375rem;
+          padding: 0.5rem;
+          cursor: pointer;
+          font-size: 1rem;
+          transition: all 0.2s ease;
+          min-width: 36px;
+          min-height: 36px;
+          display: flex;
+          align-items: center;
+          justify-content: center;
+        }
+
+        .action-button:hover {
+          border-color: #FF9900;
+          background: rgba(255, 153, 0, 0.05);
+          transform: translateY(-1px);
+        }
+
+        .action-button:active {
+          transform: translateY(0);
+        }
+
+        .edit-button:hover {
+          border-color: #146EB4;
+          background: rgba(20, 110, 180, 0.05);
+        }
+
+        .delete-button:hover {
+          border-color: #d32f2f;
+          background: rgba(211, 47, 47, 0.05);
+        }
+
         .comment-message {
           color: #232F3E;
           line-height: 1.6;
           margin: 0;
           word-wrap: break-word;
+          white-space: pre-wrap;
+        }
+
+        /* Edit Form Styles */
+        .edit-form {
+          margin-top: 1rem;
+        }
+
+        .edit-actions {
+          display: flex;
+          gap: 0.75rem;
+          margin-top: 0.75rem;
+        }
+
+        .save-button,
+        .cancel-button {
+          padding: 0.625rem 1.25rem;
+          border: none;
+          border-radius: 0.375rem;
+          font-weight: 600;
+          font-size: 0.875rem;
+          cursor: pointer;
+          transition: all 0.2s ease;
+          min-width: 44px;
+          min-height: 44px;
+        }
+
+        .save-button {
+          background: #FF9900;
+          color: white;
+        }
+
+        .save-button:hover:not(:disabled) {
+          background: #146EB4;
+          transform: translateY(-1px);
+        }
+
+        .save-button:disabled {
+          background: #545B64;
+          opacity: 0.6;
+          cursor: not-allowed;
+        }
+
+        .cancel-button {
+          background: white;
+          color: #232F3E;
+          border: 1px solid #F2F3F3;
+        }
+
+        .cancel-button:hover {
+          background: #F2F3F3;
+          border-color: #545B64;
         }
 
         .no-comments {
@@ -401,6 +610,31 @@ export default function Comments({ postId }: CommentsProps) {
 
           .submit-button {
             width: 100%;
+          }
+
+          .comment-header {
+            flex-wrap: wrap;
+          }
+
+          .comment-actions {
+            width: 100%;
+            justify-content: flex-end;
+            margin-top: 0.5rem;
+          }
+
+          .edit-actions {
+            flex-direction: column;
+          }
+
+          .save-button,
+          .cancel-button {
+            width: 100%;
+          }
+
+          .label-row {
+            flex-direction: column;
+            align-items: flex-start;
+            gap: 0.25rem;
           }
         }
       `}</style>
